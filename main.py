@@ -207,10 +207,6 @@ profile = pipeline.start(cfg)
 faceDetector = FaceDetector()
 faceDetector.Init()
 
-# 开启摄像头
-cap = cv.VideoCapture(1)
-ok = True
-
 try:
     while True:
         fs = pipeline.wait_for_frames()
@@ -255,10 +251,12 @@ try:
         # 读取图像，返回脸和眼睛的坐标
         faces, eyes = faceDetector.Detect()
 
+        # RGB相关
         # 绘制脸和眼睛
         color_image_to_color = draw_faces(color_image_to_color, faces)
         color_image_to_color = draw_eyes(color_image_to_color, eyes)
 
+        # 深度相关
         # 获取深度本征，这和相机本身有关，和相机获取的帧无关
         stream = profile.get_stream(rs.stream.depth).as_video_stream_profile()
         intrinsics = stream.get_intrinsics()

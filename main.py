@@ -5,6 +5,78 @@ import numpy as np
 from cv2.cv2 import FONT_HERSHEY_SIMPLEX, FONT_HERSHEY_PLAIN
 
 
+# 用于面部识别的类，能够根据输入的图片，输出结果
+class FaceDetector(object):
+    faceCascadePath = r'D:\Anaconda3\Lib\site-packages\cv2\data\haarcascade_frontalface_default.xml'
+    eyeCascadePath = r'D:\Anaconda3\Lib\site-packages\cv2\data\haarcascade_eye.xml'
+    readyToInit = True
+    faceCascade = None
+    eyeCascade = None
+    img = None
+
+    def __init__(self):
+        pass
+
+    def setPath(self, faceCascadePath, eyeCascadePath):
+        try:
+            self.faceCascadePath = faceCascadePath
+            self.readyToInit = False
+        except:
+            print("faceCascadePath Error: Path not found.")
+            self.readyToInit = False
+            return False
+
+        try:
+            self.eyeCascadePath = eyeCascadePath
+        except:
+            print("eyeCascadePath Error: Path not found.")
+            self.readyToInit = False
+            return False
+
+        self.readyToInit = True
+        return True
+
+    # 初始化 加载分类器
+    def Init(self):
+        if self.readyToInit:
+            # 加载人脸人别分类器
+            self.faceCascade = cv.CascadeClassifier(self.faceCascadePath)
+            # 加载眼睛识别分类器
+            self.eyeCascade = cv.CascadeClassifier(self.eyeCascadePath)
+        else:
+            print("Error: Not ready to init, set Path first")
+            return False
+
+    # 初始化之后输入一张RGB三通道图片
+    def ReadImg(self, img):
+        self.img = img
+        return True
+
+    # 处理读取的图片，返回人脸的坐标list和眼睛的坐标list
+    def Detect(self):
+        # 转换成灰度图像
+        gray = cv.cvtColor(self.img, cv.COLOR_BGR2GRAY)
+        # 人脸检测
+        faces = self.faceCascade.detectMultiScale(
+            gray,
+            scaleFactor=1.2,
+            minNeighbors=5,
+            minSize=(32, 32)
+        )
+
+        # 在检测人脸的基础上检测眼睛
+        eyes = []
+        for (x, y, w, h) in faces:
+            fac_gray = gray[y: (y + h), x: (x + w)]
+            _eyes = self.eyeCascade.detectMultiScale(fac_gray, 1.3, 2)
+
+            # 眼睛坐标的换算，将相对位置换成绝对位置
+            for (ex, ey, ew, eh) in _eyes:
+                eyes.append((x + ex, y + ey, ew, eh))
+
+        return faces, eyes
+
+
 # 获取两个点之间的距离的函数
 # 输入深度本征，深度frame，两个点的像素坐标，输出的是两个点在三维空间的距离
 # 原理是使用了 rs2_deproject_pixel_to_point() 函数，可以计算像素上某点对应的三维坐标，需要的参数是深度本征，像素坐标和深度。
@@ -46,6 +118,32 @@ def draw_distance_between_points(image, dist, point1_px, point1_py, point2_px, p
                FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
     return image
 
+
+def draw_faces(img, faces):
+    for (x, y, w, h) in faces:
+        cv.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+    return img
+
+
+def draw_eyes(img, eyes):
+    for (ex, ey, ew, eh) in eyes:
+        cv.rectangle(img, (ex, ey), (ex + ew, ey + eh), (0, 255, 0), 2)
+    return img
+
+
+def draw_distance_between_faces(intrinsics, depth_frame_to_depth, img, faces):
+    if len(faces) < 2:
+        return img
+    point1_x = faces[0][0] + faces[0][2] / 2
+    point1_y = faces[0][1] + faces[0][3] / 2
+    point2_x = faces[1][0] + faces[1][2] / 2
+    point2_y = faces[1][1] + faces[1][3] / 2
+    # 用自定义的函数获取这两个点的实际距离
+    dist = get_distance_between_points(intrinsics, depth_frame_to_depth, point1_x, point1_y, point2_x, point2_y)
+    # 用自定义函数将深度的信息绘制在图像上
+    print(point1_x, point1_y, point2_x, point2_y)
+    draw_distance_between_points(color_image_to_color, dist, point1_x, point1_y, point2_x, point2_y)
+    return img
 
 pipeline = rs.pipeline()
 
@@ -101,23 +199,17 @@ cfg.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 # 启动pipeline
 profile = pipeline.start(cfg)
 
-
 # 减少孔洞的最好办法就是硬件上增大密度
 # 可以直接在tool里面设置 可以看到开启高精度之后，孔洞多了很多
 
 
 # opencv部分
-# 人脸识别分类器
-faceCascade = cv.CascadeClassifier(r'D:\Anaconda3\Lib\site-packages\cv2\data\haarcascade_frontalface_default.xml')
-
-# 识别眼睛的分类器
-eyeCascade = cv.CascadeClassifier(r'D:\Anaconda3\Lib\site-packages\cv2\data\haarcascade_eye.xml')
+faceDetector = FaceDetector()
+faceDetector.Init()
 
 # 开启摄像头
 cap = cv.VideoCapture(1)
 ok = True
-
-
 
 try:
     while True:
@@ -157,65 +249,32 @@ try:
         # 接下来的代码是根据需要的坐标获取其距离并绘制到图像上
         # 获取坐标
 
-        # 读取摄像头中的图像，ok为是否读取成功的判断参数
-        # 转换成灰度图像
-        gray = cv.cvtColor(color_image_to_color, cv.COLOR_BGR2GRAY)
+        # 读取摄像头中的RGB图像
+        faceDetector.ReadImg(color_image_to_color)
 
-        # 人脸检测
-        faces = faceCascade.detectMultiScale(
-            gray,
-            scaleFactor=1.2,
-            minNeighbors=5,
-            minSize=(32, 32)
-        )
+        # 读取图像，返回脸和眼睛的坐标
+        faces, eyes = faceDetector.Detect()
 
-        # 在检测人脸的基础上检测眼睛
-        result = []
-        for (x, y, w, h) in faces:
-            fac_gray = gray[y: (y + h), x: (x + w)]
-            result = []
-            eyes = eyeCascade.detectMultiScale(fac_gray, 1.3, 2)
-
-            # 眼睛坐标的换算，将相对位置换成绝对位置
-            for (ex, ey, ew, eh) in eyes:
-                result.append((x + ex, y + ey, ew, eh))
-
-        # 画矩形
-        for (x, y, w, h) in faces:
-            cv.rectangle(color_image_to_color, (x, y), (x + w, y + h), (255, 0, 0), 2)
-
-        if len(faces) >= 2:
-            point1_x = faces[0][0] + faces[0][2] / 2
-            point1_y = faces[0][1] + faces[0][3] / 2
-            point2_x = faces[1][0] + faces[1][2] / 2
-            point2_y = faces[1][1] + faces[1][3] / 2
-
-        for (ex, ey, ew, eh) in result:
-            cv.rectangle(color_image_to_color, (ex, ey), (ex + ew, ey + eh), (0, 255, 0), 2)
+        # 绘制脸和眼睛
+        color_image_to_color = draw_faces(color_image_to_color, faces)
+        color_image_to_color = draw_eyes(color_image_to_color, eyes)
 
         # 获取深度本征，这和相机本身有关，和相机获取的帧无关
         stream = profile.get_stream(rs.stream.depth).as_video_stream_profile()
         intrinsics = stream.get_intrinsics()
-
         # 将depth_frame_to_depth转换为depth_frame类型，因为在之前的处理过程中，depth_frame_to_depth的类型变成了普通的frame类型
         depth_frame_to_depth = depth_frame_to_depth.as_depth_frame()
+        # 绘制脸和脸之间的距离
+        color_image_to_color = draw_distance_between_faces(intrinsics, depth_frame_to_depth, color_image_to_color, faces)
 
-        # 用自定义的函数获取这两个点的实际距离
-        if len(faces) >= 2:
-            dist = get_distance_between_points(intrinsics, depth_frame_to_depth, point1_x, point1_y, point2_x, point2_y)
-            # 用自定义函数将深度的信息绘制在图像上
-            print(point1_x, point1_y, point2_x, point2_y)
-            draw_distance_between_points(color_image_to_color, dist, point1_x, point1_y, point2_x, point2_y)
+        # 拼接图像并显示，opencv的使用常识
+        images_to_color = np.hstack((color_image_to_color, depth_image_to_color))
+        images_to_depth = np.hstack((color_image_to_depth, depth_image_to_depth))
 
-            # 拼接图像并显示，opencv的使用常识
-            images_to_color = np.hstack((color_image_to_color, depth_image_to_color))
-            images_to_depth = np.hstack((color_image_to_depth, depth_image_to_depth))
-
-            cv.imshow('window_to_color', images_to_color)
-            cv.imshow('window_to_depth', images_to_depth)
+        cv.imshow('window_to_color', images_to_color)
+        cv.imshow('window_to_depth', images_to_depth)
 
         cv.waitKey(1)
 finally:
     pipeline.stop()
-    cap.release()
     cv.destroyAllWindows()

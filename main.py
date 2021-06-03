@@ -9,9 +9,11 @@ from cv2.cv2 import FONT_HERSHEY_SIMPLEX, FONT_HERSHEY_PLAIN
 class FaceDetector(object):
     faceCascadePath = r'D:\Anaconda3\Lib\site-packages\cv2\data\haarcascade_frontalface_default.xml'
     eyeCascadePath = r'D:\Anaconda3\Lib\site-packages\cv2\data\haarcascade_eye.xml'
+    carCascadePath = r'D:\RealSense\cars_sideview_cascade_classifier.xml'
     readyToInit = True
     faceCascade = None
     eyeCascade = None
+    carCascade = None
     img = None
 
     def __init__(self):
@@ -43,6 +45,8 @@ class FaceDetector(object):
             self.faceCascade = cv.CascadeClassifier(self.faceCascadePath)
             # 加载眼睛识别分类器
             self.eyeCascade = cv.CascadeClassifier(self.eyeCascadePath)
+            # 加载车辆识别分类器
+            self.carCascade = cv.CascadeClassifier(self.carCascadePath)
         else:
             print("Error: Not ready to init, set Path first")
             return False
@@ -53,7 +57,7 @@ class FaceDetector(object):
         return True
 
     # 处理读取的图片，返回人脸的坐标list和眼睛的坐标list
-    def Detect(self):
+    def DetectFacesEyes(self):
         # 转换成灰度图像
         gray = cv.cvtColor(self.img, cv.COLOR_BGR2GRAY)
         # 人脸检测
@@ -75,6 +79,19 @@ class FaceDetector(object):
                 eyes.append((x + ex, y + ey, ew, eh))
 
         return faces, eyes
+
+    def DetectCarsSides(self):
+        # 转换成灰度图像
+        gray = cv.cvtColor(self.img, cv.COLOR_BGR2GRAY)
+        # 人脸检测
+        cars = self.carCascade.detectMultiScale(
+            gray,
+            scaleFactor=1.2,
+            minNeighbors=5,
+            minSize=(32, 32)
+        )
+
+        return cars
 
 
 # 获取两个点之间的距离的函数
@@ -125,13 +142,19 @@ def draw_faces(img, faces):
     return img
 
 
+def draw_cars(img, cars):
+    for (x, y, w, h) in cars:
+        cv.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+    return img
+
+
 def draw_eyes(img, eyes):
     for (ex, ey, ew, eh) in eyes:
         cv.rectangle(img, (ex, ey), (ex + ew, ey + eh), (0, 255, 0), 2)
     return img
 
 
-def draw_distance_between_faces(intrinsics, depth_frame_to_depth, img, faces):
+def draw_distance_between_rects(intrinsics, depth_frame_to_depth, img, faces):
     if len(faces) < 2:
         return img
     point1_x = faces[0][0] + faces[0][2] / 2
@@ -141,9 +164,10 @@ def draw_distance_between_faces(intrinsics, depth_frame_to_depth, img, faces):
     # 用自定义的函数获取这两个点的实际距离
     dist = get_distance_between_points(intrinsics, depth_frame_to_depth, point1_x, point1_y, point2_x, point2_y)
     # 用自定义函数将深度的信息绘制在图像上
-    print(point1_x, point1_y, point2_x, point2_y)
+    # print(point1_x, point1_y, point2_x, point2_y)
     draw_distance_between_points(color_image_to_color, dist, point1_x, point1_y, point2_x, point2_y)
     return img
+
 
 pipeline = rs.pipeline()
 
@@ -249,13 +273,18 @@ try:
         faceDetector.ReadImg(color_image_to_color)
 
         # 读取图像，返回脸和眼睛的坐标
-        faces, eyes = faceDetector.Detect()
+        # faces, eyes = faceDetector.DetectFacesEyes()
+        # 读取图像，返回车身的坐标
+        cars = faceDetector.DetectCarsSides()
 
         # RGB相关
         # 绘制脸和眼睛
-        color_image_to_color = draw_faces(color_image_to_color, faces)
-        color_image_to_color = draw_eyes(color_image_to_color, eyes)
-
+        # color_image_to_color = draw_faces(color_image_to_color, faces)
+        # color_image_to_color = draw_eyes(color_image_to_color, eyes)
+        
+        # 绘制车辆
+        color_image_to_color = draw_cars(color_image_to_color, cars)
+        
         # 深度相关
         # 获取深度本征，这和相机本身有关，和相机获取的帧无关
         stream = profile.get_stream(rs.stream.depth).as_video_stream_profile()
@@ -263,8 +292,12 @@ try:
         # 将depth_frame_to_depth转换为depth_frame类型，因为在之前的处理过程中，depth_frame_to_depth的类型变成了普通的frame类型
         depth_frame_to_depth = depth_frame_to_depth.as_depth_frame()
         # 绘制脸和脸之间的距离
-        color_image_to_color = draw_distance_between_faces(intrinsics, depth_frame_to_depth, color_image_to_color, faces)
+        # color_image_to_color = draw_distance_between_faces(intrinsics, depth_frame_to_depth, color_image_to_color,
+        #                                                    faces)
 
+        # 绘制车和车之间的距离
+        color_image_to_color = draw_distance_between_rects(intrinsics, depth_frame_to_depth, color_image_to_color,
+                                                           cars)
         # 拼接图像并显示，opencv的使用常识
         images_to_color = np.hstack((color_image_to_color, depth_image_to_color))
         images_to_depth = np.hstack((color_image_to_depth, depth_image_to_depth))

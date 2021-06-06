@@ -112,6 +112,23 @@ def get_distance_between_points(intrinsics, depth_frame, point1_px, point1_py, p
     return dist
 
 
+# 获取两个点(x, y, z)之间的差值的函数
+# 输入深度本征，深度frame，两个点的像素坐标，输出的是一个三元组，即两个点在三维空间的xyz距离
+# 原理是使用了 rs2_deproject_pixel_to_point() 函数，可以计算像素上某点对应的三维坐标，需要的参数是深度本征，像素坐标和深度。
+def get_diff_between_points(intrinsics, depth_frame, point1_px, point1_py, point2_px, point2_py):
+    point1_px = int(point1_px)
+    point1_py = int(point1_py)
+    point2_px = int(point2_px)
+    point2_py = int(point2_py)
+    dis1 = depth_frame.get_distance(point1_px, point1_py)
+    dis2 = depth_frame.get_distance(point2_px, point2_py)
+    point1_xyz = rs.rs2_deproject_pixel_to_point(intrinsics, (point1_px, point1_py), dis1)
+    point2_xyz = rs.rs2_deproject_pixel_to_point(intrinsics, (point2_px, point2_py), dis2)
+    # get distance 'cm'
+    return (point1_xyz[0] - point2_xyz[0]) * 100, (point1_xyz[1] - point2_xyz[1]) * 100, \
+           (point1_xyz[2] - point2_xyz[2]) * 100
+
+
 # 用于在图片上绘制两个点距离的函数
 # 输入图像，距离，两个点的坐标，即可在它们之间绘制相应数据
 # 和深度相机无关，只和opencv有关
@@ -281,10 +298,10 @@ try:
         # 绘制脸和眼睛
         # color_image_to_color = draw_faces(color_image_to_color, faces)
         # color_image_to_color = draw_eyes(color_image_to_color, eyes)
-        
+
         # 绘制车辆
         color_image_to_color = draw_cars(color_image_to_color, cars)
-        
+
         # 深度相关
         # 获取深度本征，这和相机本身有关，和相机获取的帧无关
         stream = profile.get_stream(rs.stream.depth).as_video_stream_profile()
